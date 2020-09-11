@@ -4,13 +4,16 @@ package main
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha512"
-	"encoding/base64"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"log"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
+	"github.com/gofrs/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -33,69 +36,25 @@ func (u *UserClaims) Valid() error {
 	return nil
 }
 
-// HMAC Key for JWT and Sign
-var key []byte
+type key struct {
+	key     []byte
+	created time.Time
+}
+
+var currentKeyID string
+
+// DB to Store the Keys
+var keys = map[string]key{}
 
 func main() {
+	fmt.Print("\n Rotating Keys for Safer Authentication\n\n")
 
-	// Fill the Key
-	for i := 1; i <= sha512.Size; i++ {
-		key = append(key, byte(i))
-	}
-
-	fmt.Print("\n Hashing Passwords - bcrypt \n\n")
-	pass := "123456789"
-	hash, err := hashPassword(pass)
+	err := generateKeys()
 	if err != nil {
-		log.Panic(err)
+		log.Fatalln(err)
 	}
 
-	fmt.Printf("Hashed password: %s\n\n", string(hash))
-	err = comparePassword(pass, hash)
-	if err != nil {
-		log.Fatalln("Not Logged In")
-	}
-	log.Println("Password Authentication Success!")
-
-	fmt.Print("\nHMAC Message Signing \n\n")
-
-	message := []byte("My Very Secret Message")
-	fmt.Printf("\nSecret Message: %q\n\n", string(message))
-	sig, err := signMessage(message)
-	if err != nil {
-		log.Panic(err)
-	}
-	log.Printf("Signed : %q", base64.StdEncoding.EncodeToString(sig))
-
-	same, err := checkSig(message, sig)
-	if err != nil {
-		log.Panic(err)
-	}
-
-	if !same {
-		fmt.Print("\nYour Message has been Tampered With\n\n")
-		return
-	}
-
-	fmt.Print("\nYour Message is Authentic\n\n")
-
-	fmt.Print("\nJWT Token Example\n\n")
-
-	claims := &UserClaims{}
-	claims.SessionID = 35
-	signedToken, err := createToken(claims)
-	if err != nil {
-		log.Panic(err)
-	}
-	log.Println("Original Claims:", claims)
-	log.Println("Signed Token:", signedToken)
-	fmt.Print("\n Token has parts separated by '.'\n\n")
-
-	respClaims, err := parseToken(signedToken)
-	if err != nil {
-		log.Panic(err)
-	}
-	log.Println("Varified Token Claims:", respClaims)
+	fmt.Printf("Key Generated Successfully: %q\n\n", hex.EncodeToString(keys[currentKeyID].key))
 }
 
 func hashPassword(password string) ([]byte, error) {
@@ -113,7 +72,7 @@ func comparePassword(password string, hashedPassword []byte) error {
 func signMessage(msg []byte) ([]byte, error) {
 
 	// Create the Hasher using a Key
-	hash := hmac.New(sha512.New, key)
+	hash := hmac.New(sha512.New, keys[currentKeyID].key)
 
 	_, err := hash.Write(msg)
 	if err != nil {
@@ -138,7 +97,7 @@ func checkSig(msg, sig []byte) (bool, error) {
 
 func createToken(c *UserClaims) (string, error) {
 	t := jwt.NewWithClaims(jwt.SigningMethodHS512, c)
-	signedToken, err := t.SignedString(key)
+	signedToken, err := t.SignedString(keys[currentKeyID].key)
 	if err != nil {
 		return "", fmt.Errorf("Error in createToken when signing token : %w", err)
 	}
@@ -157,7 +116,7 @@ func parseToken(signedToken string) (*UserClaims, error) {
 			if t.Method.Alg() != jwt.SigningMethodHS512.Alg() {
 				return nil, fmt.Errorf("Error Invalid Signing Method")
 			}
-			return key, nil
+			return keys[currentKeyID].key, nil
 		})
 
 	if err != nil {
@@ -170,4 +129,28 @@ func parseToken(signedToken string) (*UserClaims, error) {
 
 	claims := t.Claims.(*UserClaims)
 	return claims, nil
+}
+
+func generateKeys() error {
+	newKey := make([]byte, sha512.Size)
+	_, err := io.ReadFull(rand.Reader, newKey)
+	if err != nil {
+		return fmt.Errorf("Error in generateKeys failed to read random numbers")
+	}
+
+	u, err := uuid.NewV4()
+	if err != nil {
+		return fmt.Errorf("Error in generateKeys while getting uuid")
+	}
+
+	keyID := u.String()
+
+	keys[keyID] = key{
+		key:     newKey,
+		created: time.Now(),
+	}
+
+	currentKeyID = keyID
+
+	return nil
 }
