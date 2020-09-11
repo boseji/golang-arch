@@ -13,7 +13,7 @@ type person struct {
 }
 
 func main() {
-	fmt.Println("\nJSON Marshalling")
+	fmt.Println("\nJSON Un-Marshalling")
 
 	p1 := person{
 		Name: "Devika",
@@ -33,5 +33,13 @@ func main() {
 		log.Panic(err)
 	}
 
-	fmt.Printf("\n%q \n\n", string(bys))
+	fmt.Printf("\nMarshalled: %q \n", string(bys))
+
+	xp2 := []person{}
+	err = json.Unmarshal(bys, &xp2)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	fmt.Printf("\nBack into Go Datastructure : %v\n\n", xp2)
 }
