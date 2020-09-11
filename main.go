@@ -87,8 +87,15 @@ func main() {
 	if err != nil {
 		log.Panic(err)
 	}
+	log.Println("Original Claims:", claims)
 	log.Println("Signed Token:", signedToken)
 	fmt.Print("\n Token has parts separated by '.'\n\n")
+
+	respClaims, err := parseToken(signedToken)
+	if err != nil {
+		log.Panic(err)
+	}
+	log.Println("Varified Token Claims:", respClaims)
 }
 
 func hashPassword(password string) ([]byte, error) {
@@ -133,7 +140,34 @@ func createToken(c *UserClaims) (string, error) {
 	t := jwt.NewWithClaims(jwt.SigningMethodHS512, c)
 	signedToken, err := t.SignedString(key)
 	if err != nil {
-		return "", fmt.Errorf("Error in Create Token when signing token : %w", err)
+		return "", fmt.Errorf("Error in createToken when signing token : %w", err)
 	}
 	return signedToken, nil
+}
+
+func parseToken(signedToken string) (*UserClaims, error) {
+
+	// Empty Claim is passed since its not used
+	// - This Verification of Signing Method to get the Specific Key
+	// - Some times the 'keyID' is also fetched from the token
+	// - Token `t` using in the callback is a non-verified token
+	//   use it with caution
+	t, err := jwt.ParseWithClaims(signedToken, &UserClaims{},
+		func(t *jwt.Token) (interface{}, error) {
+			if t.Method.Alg() != jwt.SigningMethodHS512.Alg() {
+				return nil, fmt.Errorf("Error Invalid Signing Method")
+			}
+			return key, nil
+		})
+
+	if err != nil {
+		return nil, fmt.Errorf("Error in parseToken while verifying the token: %w", err)
+	}
+
+	if !t.Valid {
+		return nil, fmt.Errorf("Error in parseToken since token is not valid")
+	}
+
+	claims := t.Claims.(*UserClaims)
+	return claims, nil
 }
