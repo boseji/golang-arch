@@ -3,7 +3,9 @@ package main
 // Marshaling Example
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 )
 
@@ -12,11 +14,7 @@ type person struct {
 }
 
 func main() {
-	fmt.Println("\nJSON Server Setup")
-
-	// p1 := person{
-	// 	Name: "Devika",
-	// }
+	fmt.Print("\nJSON Server Encode - Fixed Example\n\n")
 
 	// p2 := person{
 	// 	Name: "Radhika",
@@ -49,6 +47,16 @@ func main() {
 
 func handleEncode(w http.ResponseWriter, r *http.Request) {
 
+	p1 := person{
+		Name: "Devika",
+	}
+
+	err := json.NewEncoder(w).Encode(p1)
+	if err != nil {
+		log.Println("Error Bad data: ", err)
+	}
+	// We can Access This using
+	// `curl localhost:8080/encode`
 }
 
 func handleDecode(w http.ResponseWriter, r *http.Request) {
