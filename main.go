@@ -80,6 +80,15 @@ func main() {
 	fmt.Print("\nYour Message is Authentic\n\n")
 
 	fmt.Print("\nJWT Token Example\n\n")
+
+	claims := &UserClaims{}
+	claims.SessionID = 35
+	signedToken, err := createToken(claims)
+	if err != nil {
+		log.Panic(err)
+	}
+	log.Println("Signed Token:", signedToken)
+	fmt.Print("\n Token has parts separated by '.'\n\n")
 }
 
 func hashPassword(password string) ([]byte, error) {
