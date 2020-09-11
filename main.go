@@ -5,6 +5,7 @@ package main
 import (
 	"crypto/hmac"
 	"crypto/sha512"
+	"encoding/base64"
 	"fmt"
 	"log"
 
@@ -16,12 +17,11 @@ var key []byte
 func main() {
 
 	// Fill the Key
-	var i byte = 1
-	for ; i <= 64; i++ {
-		key = append(key, i)
+	for i := 1; i <= sha512.Size; i++ {
+		key = append(key, byte(i))
 	}
 
-	fmt.Print("\nHashing Passwords - bcrypt\n\n")
+	fmt.Print("\n Hashing Passwords - bcrypt \n\n")
 	pass := "123456789"
 	hash, err := hashPassword(pass)
 	if err != nil {
@@ -34,6 +34,28 @@ func main() {
 		log.Fatalln("Not Logged In")
 	}
 	log.Println("Password Authentication Success!")
+
+	fmt.Print("\nHMAC Message Signing \n\n")
+
+	message := []byte("My Very Secret Message")
+	fmt.Printf("\nSecret Message: %q\n\n", string(message))
+	sig, err := signMessage(message)
+	if err != nil {
+		log.Panic(err)
+	}
+	log.Printf("Signed : %q", base64.StdEncoding.EncodeToString(sig))
+
+	same, err := checkSig(message, sig)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	if !same {
+		fmt.Print("\nYour Message has been Tampered With\n\n")
+		return
+	}
+
+	fmt.Print("\nYour Message is Authentic\n\n")
 }
 
 func hashPassword(password string) ([]byte, error) {
