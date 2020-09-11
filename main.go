@@ -14,31 +14,7 @@ type person struct {
 }
 
 func main() {
-	fmt.Print("\nJSON Server Encode Decode - Fixed Example\n\n")
-
-	// p2 := person{
-	// 	Name: "Radhika",
-	// }
-
-	// xp := []person{
-	// 	p1,
-	// 	p2,
-	// }
-
-	// bys, err := json.Marshal(xp)
-	// if err != nil {
-	// 	log.Panic(err)
-	// }
-
-	// fmt.Printf("\nMarshalled: %q \n", string(bys))
-
-	// xp2 := []person{}
-	// err = json.Unmarshal(bys, &xp2)
-	// if err != nil {
-	// 	log.Panic(err)
-	// }
-
-	// fmt.Printf("\nBack into Go Datastructure : %v\n\n", xp2)
+	fmt.Print("\nJSON Server Encode Decode (Slice) - Fixed Example {HandsOn 1,2}\n\n")
 
 	http.HandleFunc("/encode", handleEncode)
 	http.HandleFunc("/decode", handleDecode)
@@ -50,8 +26,16 @@ func handleEncode(w http.ResponseWriter, r *http.Request) {
 	p1 := person{
 		Name: "Devika",
 	}
+	p2 := person{
+		Name: "Radhika",
+	}
 
-	err := json.NewEncoder(w).Encode(p1)
+	xp := []person{
+		p1,
+		p2,
+	}
+
+	err := json.NewEncoder(w).Encode(xp)
 	if err != nil {
 		log.Println("Error Bad data: ", err)
 	}
@@ -61,16 +45,18 @@ func handleEncode(w http.ResponseWriter, r *http.Request) {
 
 func handleDecode(w http.ResponseWriter, r *http.Request) {
 
-	var p person
+	//var p person
+	xp2 := []person{}
 
-	err := json.NewDecoder(r.Body).Decode(&p)
+	err := json.NewDecoder(r.Body).Decode(&xp2)
 	if err != nil {
 		log.Println("Error Decode Bad Data: ", err)
+		return
 	}
 
-	log.Println("Received Person:", p)
+	log.Println("Received Persons:", xp2)
 	// We can Access This using
-	// `curl -XGET -H "Content-type: application/json" -d '{"Name":"Priya"}' localhost:8080/decode`
+	// `curl -XGET -H "Content-type: application/json" -d '[{"Name":"Priya"}]' localhost:8080/decode`
 	//
 	// Easy Use: https://curlbuilder.com/
 	// To Build this command
