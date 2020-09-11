@@ -21,7 +21,7 @@ type UserClaims struct {
 }
 
 // Valid - Implementing the Required Interface for JWT token Claims
-func (u UserClaims) Valid() error {
+func (u *UserClaims) Valid() error {
 	if u.VerifyExpiresAt(time.Now().Unix(), true) {
 		return fmt.Errorf("Token has Expired")
 	}
@@ -78,6 +78,8 @@ func main() {
 	}
 
 	fmt.Print("\nYour Message is Authentic\n\n")
+
+	fmt.Print("\nJWT Token Example\n\n")
 }
 
 func hashPassword(password string) ([]byte, error) {
