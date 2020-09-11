@@ -8,10 +8,32 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"time"
 
+	"github.com/dgrijalva/jwt-go"
 	"golang.org/x/crypto/bcrypt"
 )
 
+// UserClaims custom claims Structure
+type UserClaims struct {
+	jwt.StandardClaims
+	SessionID int64
+}
+
+// Valid - Implementing the Required Interface for JWT token Claims
+func (u UserClaims) Valid() error {
+	if u.VerifyExpiresAt(time.Now().Unix(), true) {
+		return fmt.Errorf("Token has Expired")
+	}
+
+	if u.SessionID <= 0 {
+		return fmt.Errorf("Invalid Session ID")
+	}
+
+	return nil
+}
+
+// HMAC Key
 var key []byte
 
 func main() {
