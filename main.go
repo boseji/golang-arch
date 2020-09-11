@@ -14,7 +14,7 @@ type person struct {
 }
 
 func main() {
-	fmt.Print("\nJSON Server Encode Decode (Slice) - Fixed Example {HandsOn 1,2}\n\n")
+	fmt.Print("\nJSON Server Encode Decode (Slice) - Fixed Example {Ninja 1 HandsOn 1,2}\n\n")
 
 	http.HandleFunc("/encode", handleEncode)
 	http.HandleFunc("/decode", handleDecode)
