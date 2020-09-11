@@ -3,13 +3,24 @@ package main
 // Marshaling Example
 
 import (
+	"crypto/hmac"
+	"crypto/sha512"
 	"fmt"
 	"log"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
+var key []byte
+
 func main() {
+
+	// Fill the Key
+	var i byte = 1
+	for ; i <= 64; i++ {
+		key = append(key, i)
+	}
+
 	fmt.Print("\nHashing Passwords - bcrypt\n\n")
 	pass := "123456789"
 	hash, err := hashPassword(pass)
@@ -35,4 +46,30 @@ func hashPassword(password string) ([]byte, error) {
 
 func comparePassword(password string, hashedPassword []byte) error {
 	return bcrypt.CompareHashAndPassword(hashedPassword, []byte(password))
+}
+
+func signMessage(msg []byte) ([]byte, error) {
+
+	// Create the Hasher using a Key
+	hash := hmac.New(sha512.New, key)
+
+	_, err := hash.Write(msg)
+	if err != nil {
+		return nil, fmt.Errorf("Error in signMessage while hashing message: \n %w", err)
+	}
+
+	signature := hash.Sum(nil)
+	return signature, nil
+}
+
+func checkSig(msg, sig []byte) (bool, error) {
+
+	//Create the Hasher using a Key
+	newSign, err := signMessage(msg)
+	if err != nil {
+		return false, err
+	}
+
+	same := hmac.Equal(newSign, sig)
+	return same, nil
 }
