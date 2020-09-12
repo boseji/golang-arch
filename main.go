@@ -3,10 +3,13 @@ package main
 // Marshaling Example
 
 import (
+	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha512"
-	"encoding/hex"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
@@ -47,14 +50,31 @@ var currentKeyID string
 var keys = map[string]key{}
 
 func main() {
-	fmt.Print("\n Rotating Keys for Safer Authentication\n\n")
+	fmt.Print("\n Encryption and Decryption using AES-CTR\n\n")
 
 	err := generateKeys()
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	fmt.Printf("Key Generated Successfully: %q\n\n", hex.EncodeToString(keys[currentKeyID].key))
+	fmt.Printf("Key Generated Successfully: %q\n\n", toBase64(keys[currentKeyID].key))
+
+	aesKey := keys[currentKeyID].key[:32] // 32 - AES 256
+	fmt.Printf("New AES Key: %q\n\n", toBase64(aesKey))
+
+	message := "My secret Message to be sent safely. This is long message but is essential for checking the feasibility of Encryption."
+	enc, err := encryptAESCTR(aesKey, message)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	fmt.Printf("Encrypted : %q\n\n", toBase64(enc))
+
+	dec, err := decryptAESCTR(aesKey, string(enc))
+	if err != nil {
+		log.Fatalln(err)
+	}
+	fmt.Printf("Decrypted : %q\n\n", string(dec))
 }
 
 func hashPassword(password string) ([]byte, error) {
@@ -153,4 +173,47 @@ func generateKeys() error {
 	currentKeyID = keyID
 
 	return nil
+}
+
+func encryptAESCTR(key []byte, input string) ([]byte, error) {
+	b, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("Error in encryptAESCTR while creating the AES Cipher: %w", err)
+	}
+
+	iv := make([]byte, aes.BlockSize)
+
+	crypt := cipher.NewCTR(b, iv)
+
+	var buff bytes.Buffer
+
+	sw := &cipher.StreamWriter{
+		S: crypt,
+		W: &buff,
+	}
+
+	bReader := bytes.NewReader([]byte(input))
+
+	_, err = io.Copy(sw, bReader)
+	if err != nil {
+		return nil, fmt.Errorf("Error in encryptAESCTR while writing to stream : %w", err)
+	}
+
+	return buff.Bytes(), nil
+}
+
+func decryptAESCTR(key []byte, input string) ([]byte, error) {
+	return encryptAESCTR(key, input)
+}
+
+func toBase64(input []byte) string {
+	return base64.URLEncoding.EncodeToString(input)
+}
+
+func fromBase64(input string) ([]byte, error) {
+	bs, err := base64.URLEncoding.DecodeString(input)
+	if err != nil {
+		return nil, fmt.Errorf("Error in fromBase64 while decoding : %w", err)
+	}
+	return bs, nil
 }
