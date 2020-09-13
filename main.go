@@ -3,52 +3,105 @@ package main
 // Marshaling Example
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/sha256"
 	"fmt"
 	"io"
 	"log"
-	"os"
+	"net/http"
+	"strings"
 )
 
 func main() {
-	fmt.Print("\n AES-CTR File Decryption Example\n\n")
+	fmt.Print("\n HMAC Cookie Example\n\n")
 
-	fr, err := os.Open("encrypted.bin")
-	if err != nil {
-		log.Fatalln(err)
-	}
-	defer fr.Close()
+	http.HandleFunc("/", rootHandler)
+	http.HandleFunc("/submit", submitHandler)
+	http.ListenAndServe(":8080", nil)
+}
 
-	fw, err := os.OpenFile("decrypted.txt", os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	defer fw.Close()
+var password = []byte("my Super Secret Password")
 
-	iv := make([]byte, aes.BlockSize)
-	io.ReadFull(fr, iv)
-
-	password := []byte("This is A Super Secret Password")
+func getCode(data string) (string, error) {
 	key := sha256.Sum256(password)
-	keyXb := key[:]
 
-	b, err := aes.NewCipher(keyXb)
+	h := hmac.New(sha256.New, key[:])
+	_, err := io.WriteString(h, data)
 	if err != nil {
-		log.Fatalln("Error in getting new AES block cipher", err)
+		return "", fmt.Errorf("Error in getCode while writing to digest")
 	}
 
-	aesctr := cipher.NewCTR(b, iv)
-	aesW := &cipher.StreamWriter{
-		S: aesctr,
-		W: fw,
+	result := fmt.Sprintf("%x", h.Sum(nil))
+	return result, nil
+}
+
+func submitHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
 	}
 
-	_, err = io.Copy(aesW, fr)
-	if err != nil {
-		log.Fatalln("Error in copying data to stream cipher", err)
+	email := r.FormValue("email")
+	if email == "" {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
 	}
 
-	fmt.Print("Decrypted File Written Successfully\n\n")
+	code, err := getCode(email)
+	if email == "" {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		log.Println(err)
+		return
+	}
+
+	c := &http.Cookie{
+		Name:  "session",
+		Value: code + "|" + email,
+	}
+
+	sessionValid := false
+
+	ck, err := r.Cookie("session")
+	for err == nil && ck != nil {
+		val := ck.Value
+		values := strings.Split(val, "|")
+		if len(values) != 2 {
+			break
+		}
+
+		ncode := values[0]
+
+		nemail := values[1]
+
+		if ncode == code && nemail == email {
+			sessionValid = true
+		}
+		break
+	}
+
+	http.SetCookie(w, c)
+	if !sessionValid {
+		io.WriteString(w, "Success")
+		return
+	}
+	io.WriteString(w, "Already Logged In")
+}
+
+func rootHandler(w http.ResponseWriter, r *http.Request) {
+	html := `<!DOCTYPE html>
+	<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>HMAC Cookie Example</title>
+	</head>
+	<body>
+		<form action="/submit" method="post">
+			<input type="email" name="email">
+			<input type="submit">
+		</form>
+	</body>
+	</html>`
+
+	io.WriteString(w, html)
 }
