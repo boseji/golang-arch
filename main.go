@@ -5,7 +5,6 @@ package main
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -14,27 +13,22 @@ import (
 )
 
 func main() {
-	fmt.Print("\n AES-CTR File Encryption Example\n\n")
+	fmt.Print("\n AES-CTR File Decryption Example\n\n")
 
-	fr, err := os.Open("test.txt")
+	fr, err := os.Open("encrypted.bin")
 	if err != nil {
 		log.Fatalln(err)
 	}
 	defer fr.Close()
 
-	fw, err := os.OpenFile("encrypted.bin", os.O_CREATE|os.O_WRONLY, 0644)
+	fw, err := os.OpenFile("decrypted.txt", os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatalln(err)
 	}
 	defer fw.Close()
 
 	iv := make([]byte, aes.BlockSize)
-	io.ReadFull(rand.Reader, iv)
-
-	_, err = fw.Write(iv)
-	if err != nil {
-		log.Fatalln("Error Writing iv", err)
-	}
+	io.ReadFull(fr, iv)
 
 	password := []byte("This is A Super Secret Password")
 	key := sha256.Sum256(password)
@@ -56,5 +50,5 @@ func main() {
 		log.Fatalln("Error in copying data to stream cipher", err)
 	}
 
-	fmt.Print("Encrypted File Written Successfully\n\n")
+	fmt.Print("Decrypted File Written Successfully\n\n")
 }
