@@ -3,6 +3,9 @@ package main
 // Marshaling Example
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -11,23 +14,47 @@ import (
 )
 
 func main() {
-	fmt.Print("\n SHA256 File Hashing\n\n")
+	fmt.Print("\n AES-CTR File Encryption Example\n\n")
 
-	f, err := os.Open("test.txt")
+	fr, err := os.Open("test.txt")
 	if err != nil {
 		log.Fatalln(err)
 	}
-	defer f.Close()
+	defer fr.Close()
 
-	h := sha256.New()
-	_, err = io.Copy(h, f)
+	fw, err := os.OpenFile("encrypted.bin", os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		log.Fatalln("Error in io.Copy", err)
+		log.Fatalln(err)
+	}
+	defer fw.Close()
+
+	iv := make([]byte, aes.BlockSize)
+	io.ReadFull(rand.Reader, iv)
+
+	_, err = fw.Write(iv)
+	if err != nil {
+		log.Fatalln("Error Writing iv", err)
 	}
 
-	result := h.Sum(nil)
-	fmt.Printf("Hashed Result %x\n", result)
-	fmt.Println("\n The same can be replicated using the command")
-	fmt.Print("  'shasum -a 256 test.txt'")
-	fmt.Print("\n\n")
+	password := []byte("This is A Super Secret Password")
+	key := sha256.Sum256(password)
+	keyXb := key[:]
+
+	b, err := aes.NewCipher(keyXb)
+	if err != nil {
+		log.Fatalln("Error in getting new AES block cipher", err)
+	}
+
+	aesctr := cipher.NewCTR(b, iv)
+	aesW := &cipher.StreamWriter{
+		S: aesctr,
+		W: fw,
+	}
+
+	_, err = io.Copy(aesW, fr)
+	if err != nil {
+		log.Fatalln("Error in copying data to stream cipher", err)
+	}
+
+	fmt.Print("Encrypted File Written Successfully\n\n")
 }
