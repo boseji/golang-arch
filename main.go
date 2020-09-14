@@ -3,36 +3,87 @@ package main
 // Marshaling Example
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"strings"
+	"time"
+
+	"github.com/dgrijalva/jwt-go"
+	"github.com/gofrs/uuid"
 )
 
+var mySigningKey = []byte("Super Secret long Password that works with 86546 number endings")
+
+type customClaims struct {
+	SessionID string `json:"session"`
+	Email     string `json:"email"`
+	jwt.StandardClaims
+}
+
+func getToken(session, email string, age time.Duration) (string, error) {
+	t := time.Now()
+	claims := customClaims{
+		SessionID: session,
+		Email:     email,
+		StandardClaims: jwt.StandardClaims{
+			Issuer:    "Test",
+			NotBefore: t.Unix(),
+			IssuedAt:  t.Unix(),
+			ExpiresAt: t.Add(age).Unix(),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS512, &claims)
+	key := sha512.Sum512(mySigningKey)
+
+	ss, err := token.SignedString(key[:])
+	if err != nil {
+		return "", fmt.Errorf("couldn't get SignedString in NewWithClaims: %w", err)
+	}
+	return ss, nil
+}
+
+func checkToken(token string) (*customClaims, error) {
+
+	if token == "" {
+		return nil, fmt.Errorf("Empty Token")
+	}
+	tokenAfter, err := jwt.ParseWithClaims(token, &customClaims{},
+		func(tokenBefore *jwt.Token) (interface{}, error) {
+			if tokenBefore.Method.Alg() != jwt.SigningMethodHS512.Alg() {
+				return nil, fmt.Errorf("Wrong Signing method used")
+			}
+			key := sha512.Sum512(mySigningKey)
+			return key[:], nil
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("Error in checkToken while parsing token: %w", err)
+	}
+
+	if !tokenAfter.Valid {
+		return nil, fmt.Errorf("Error in checkToken since token is not Valid")
+	}
+
+	claims := tokenAfter.Claims.(*customClaims)
+
+	return claims, nil
+}
+
 func main() {
-	fmt.Print("\n HMAC Cookie Example - Correct Validation \n\n")
+	fmt.Print("\n JWT Cookie - with Verification \n\n")
+
+	key := sha512.Sum512(mySigningKey)
+	fmt.Printf(" Our Key %q\n", base64.URLEncoding.EncodeToString(key[:]))
+
+	fmt.Println("\n Running Server on :8080")
 
 	http.HandleFunc("/", rootHandler)
 	http.HandleFunc("/submit", submitHandler)
 	http.ListenAndServe(":8080", nil)
-}
-
-var password = []byte("my Super Secret Password")
-
-func getCode(data string) (string, error) {
-	key := sha256.Sum256(password)
-
-	h := hmac.New(sha256.New, key[:])
-	_, err := io.WriteString(h, data)
-	if err != nil {
-		return "", fmt.Errorf("Error in getCode while writing to digest")
-	}
-
-	result := fmt.Sprintf("%x", h.Sum(nil))
-	return result, nil
 }
 
 func submitHandler(w http.ResponseWriter, r *http.Request) {
@@ -41,22 +92,32 @@ func submitHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	email := r.FormValue("email")
+	email := r.FormValue("emailField")
 	if email == "" {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
 
-	code, err := getCode(email)
-	if email == "" {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+	uid, err := uuid.NewV4()
+	if err != nil {
+		http.Error(w, "Couldn't session ID", http.StatusInternalServerError)
+		log.Println(err)
+		return
+	}
+	session := uid.String()
+
+	code, err := getToken(session, email, 5*time.Second)
+	if err != nil {
+		http.Error(w, "Couldn't get JWT", http.StatusInternalServerError)
 		log.Println(err)
 		return
 	}
 
 	c := &http.Cookie{
-		Name:  "session",
-		Value: code + "|" + email,
+		Name:     "session",
+		Value:    code,
+		MaxAge:   5,
+		HttpOnly: true,
 	}
 
 	http.SetCookie(w, c)
@@ -69,17 +130,11 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 		ck = &http.Cookie{}
 	}
 
-	isEqual := true
-	xs := strings.SplitN(ck.Value, "|", 2)
-	if len(xs) == 2 {
-		cCode := xs[0]
-		cEmail := xs[1]
-
-		code, _ := getCode(cEmail)
-
-		isEqual = hmac.Equal([]byte(cCode), []byte(code))
+	valid := true
+	claims, err := checkToken(ck.Value)
+	if err != nil {
+		valid = false
 	}
-
 	html := `<!DOCTYPE html>
 	<html lang="en">
 	<head>
@@ -90,15 +145,15 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 	<body>
 		%s
 		<form action="/submit" method="post">
-			<input type="email" name="email">
+			<input type="email" name="emailField">
 			<input type="submit">
 		</form>
 	</body>
 	</html>`
 
 	msg := "Not Logged In"
-	if isEqual {
-		msg = "Logged In"
+	if valid {
+		msg = "Logged In as " + claims.Email
 	}
 	cookieAdd := `<p>Cookie Value: ` + ck.Value + `</p>
 				  <p>` + msg + `</p>`
