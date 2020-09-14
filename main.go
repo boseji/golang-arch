@@ -9,10 +9,11 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 )
 
 func main() {
-	fmt.Print("\n HMAC Cookie Example - Alternate \n\n")
+	fmt.Print("\n HMAC Cookie Example - Correct Validation \n\n")
 
 	http.HandleFunc("/", rootHandler)
 	http.HandleFunc("/submit", submitHandler)
@@ -68,6 +69,17 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 		ck = &http.Cookie{}
 	}
 
+	isEqual := true
+	xs := strings.SplitN(ck.Value, "|", 2)
+	if len(xs) == 2 {
+		cCode := xs[0]
+		cEmail := xs[1]
+
+		code, _ := getCode(cEmail)
+
+		isEqual = hmac.Equal([]byte(cCode), []byte(code))
+	}
+
 	html := `<!DOCTYPE html>
 	<html lang="en">
 	<head>
@@ -84,7 +96,12 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 	</body>
 	</html>`
 
-	cookieAdd := `<p>Cookie Value: ` + ck.Value + `</p>`
+	msg := "Not Logged In"
+	if isEqual {
+		msg = "Logged In"
+	}
+	cookieAdd := `<p>Cookie Value: ` + ck.Value + `</p>
+				  <p>` + msg + `</p>`
 	if ck.Value == "" {
 		cookieAdd = ""
 	}
