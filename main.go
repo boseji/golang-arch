@@ -9,11 +9,10 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"strings"
 )
 
 func main() {
-	fmt.Print("\n HMAC Cookie Example\n\n")
+	fmt.Print("\n HMAC Cookie Example - Alternate \n\n")
 
 	http.HandleFunc("/", rootHandler)
 	http.HandleFunc("/submit", submitHandler)
@@ -59,35 +58,16 @@ func submitHandler(w http.ResponseWriter, r *http.Request) {
 		Value: code + "|" + email,
 	}
 
-	sessionValid := false
-
-	ck, err := r.Cookie("session")
-	for err == nil && ck != nil {
-		val := ck.Value
-		values := strings.Split(val, "|")
-		if len(values) != 2 {
-			break
-		}
-
-		ncode := values[0]
-
-		nemail := values[1]
-
-		if ncode == code && nemail == email {
-			sessionValid = true
-		}
-		break
-	}
-
 	http.SetCookie(w, c)
-	if !sessionValid {
-		io.WriteString(w, "Success")
-		return
-	}
-	io.WriteString(w, "Already Logged In")
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func rootHandler(w http.ResponseWriter, r *http.Request) {
+	ck, err := r.Cookie("session")
+	if err != nil {
+		ck = &http.Cookie{}
+	}
+
 	html := `<!DOCTYPE html>
 	<html lang="en">
 	<head>
@@ -96,6 +76,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 		<title>HMAC Cookie Example</title>
 	</head>
 	<body>
+		%s
 		<form action="/submit" method="post">
 			<input type="email" name="email">
 			<input type="submit">
@@ -103,5 +84,10 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 	</body>
 	</html>`
 
-	io.WriteString(w, html)
+	cookieAdd := `<p>Cookie Value: ` + ck.Value + `</p>`
+	if ck.Value == "" {
+		cookieAdd = ""
+	}
+
+	io.WriteString(w, fmt.Sprintf(html, cookieAdd))
 }
