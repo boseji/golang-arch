@@ -6,10 +6,24 @@
     <title>Registration Form</title>
 </head>
 <body>
-    <form action="/register" method="POST">
-        <p><input type="email" name="emailField" placeholder="Email" autofocus></p>
-        <p><input type="password" name="passField" placeholder="Password"></p>
-        <p><input type="submit"></p>
-    </form>
+    <div>
+        <h1>Registration Form</h1>
+        <form action="/register" method="POST">
+            <p><input type="email" name="emailField" placeholder="Email" autofocus></p>
+            <p><input type="password" name="passField" placeholder="Password"></p>
+            <p><input type="submit" value="Submit"></p>
+        </form>
+    </div>
+    <div>
+        <h1>Login Form</h1>
+        <form action="/login" method="post">
+            <p><input type="email" name="emailField" id="email" placeholder="Email"></p>
+            <p><input type="password" name="passField" placeholder="Password"></p>
+            <p><input type="submit" value="Submit"></p>
+        </form>
+    </div>
+    <div>
+        <p>{{.}}</p>
+    </div>
 </body>
 </html>
