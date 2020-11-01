@@ -1,17 +1,21 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"html/template"
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
 func main() {
-	fmt.Print("\nNinja Level 2 - Hands-On Exercise 2\n\n")
+	fmt.Print("\nNinja Level 2 - Hands-On Exercise 3\n\n")
 	/*
 		For this hands-on exercise:
 			Modify the server from the previous exercise
@@ -34,6 +38,8 @@ func main() {
 }
 
 var store = map[string][]byte{}
+
+const key = "This is a Super Secret Key"
 
 func index(w http.ResponseWriter, r *http.Request) {
 	errMsg := r.FormValue("errorMsg")
@@ -156,4 +162,46 @@ func login(w http.ResponseWriter, r *http.Request) {
 	log.Println("Login Successful", email)
 	msg := url.QueryEscape("Logged In")
 	http.Redirect(w, r, "/?successMsg="+msg, http.StatusSeeOther)
+}
+
+func createToken(sessionID string) (string, error) {
+	h := hmac.New(sha256.New, []byte(key))
+
+	_, err := h.Write([]byte(sessionID))
+	if err != nil {
+		return "", fmt.Errorf("Failed to write to hmac in createToken: %w", err)
+	}
+
+	code := h.Sum(nil)
+	result := base64.URLEncoding.EncodeToString(code) + "|" + sessionID
+	return result, nil
+}
+
+func parseToken(token string) (string, error) {
+	xs := strings.SplitN(token, "|", 2)
+	if len(xs) != 2 {
+		return "", fmt.Errorf("Error in Token")
+	}
+
+	code, err := base64.URLEncoding.DecodeString(xs[0])
+	if err != nil {
+		return "", fmt.Errorf("Failed decode base64 code in parseToken: %w", err)
+	}
+
+	sessionID := xs[1]
+
+	h := hmac.New(sha256.New, []byte(key))
+	_, err = h.Write([]byte(sessionID))
+	if err != nil {
+		return "", fmt.Errorf("Failed to write to hmac in parseToken: %w", err)
+	}
+
+	v := h.Sum(nil)
+
+	equal := hmac.Equal(code, v)
+	if !equal {
+		return "", fmt.Errorf("Error in Token or it was tampered with")
+	}
+
+	return sessionID, nil
 }
