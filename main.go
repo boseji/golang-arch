@@ -194,6 +194,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 		log.Println(err)
 		msg := url.QueryEscape("Login Failed")
 		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
+		return
 	}
 
 	sessions[sessionID] = email
