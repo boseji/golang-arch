@@ -1,36 +1,18 @@
 package main
 
 import (
-	"crypto/hmac"
 	"crypto/sha256"
-	"encoding/base64"
 	"fmt"
 	"html/template"
 	"log"
 	"net/http"
 	"net/url"
-	"strings"
+	"time"
 
+	"github.com/dgrijalva/jwt-go"
 	"github.com/gofrs/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
-
-func main() {
-	fmt.Print("\nNinja Level 2 - Hands-On Exercise 5\n\n")
-	/*
-		For this hands-on exercise:
-
-		- Modify the server from the previous exercise
-		- have the db map store a struct of user fields, including bcrypted password
-		- display a user field (not bcrypted password) when someone’s session is active
-	*/
-	http.HandleFunc("/", index)
-	http.HandleFunc("/register", register)
-	http.HandleFunc("/login", login)
-
-	fmt.Print("Starting Server on :8080\n\n")
-	log.Fatalln(http.ListenAndServe(":8080", nil))
-}
 
 type user struct {
 	First    string
@@ -45,7 +27,37 @@ type dataTemp struct {
 var db = map[string]user{}
 var sessions = map[string]string{}
 
-const key = "This is a Super Secret Key"
+const password = "This is a Super Secret Key"
+
+var key []byte
+
+func main() {
+	fmt.Print("\nNinja Level 2 - Hands-On Exercise 6\n\n")
+	/*
+		For this hands-on exercise:
+
+		- Modify the server from the previous exercise
+		- Modify createToken and parseToken to use JWT
+			= Create a custom claims type that embeds jwt.StandardClaims
+			= The custom claims type should have the session id in it
+			= Make sure to set the ExpiresAt field with a time limit
+				time.Now().......
+			= Use an HMAC signing method
+			= Make sure to check if the token is valid in the parseToken endpoint
+		- Question
+			- will we still need our sessions table / database?
+			- YES!
+	*/
+	k := sha256.Sum256([]byte(password))
+	key = k[:]
+
+	http.HandleFunc("/", index)
+	http.HandleFunc("/register", register)
+	http.HandleFunc("/login", login)
+
+	fmt.Print("Starting Server on :8080\n\n")
+	log.Fatalln(http.ListenAndServe(":8080", nil))
+}
 
 func index(w http.ResponseWriter, r *http.Request) {
 	errMsg := r.FormValue("errorMsg")
@@ -212,44 +224,48 @@ func login(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/?successMsg="+msg, http.StatusSeeOther)
 }
 
-func createToken(sessionID string) (string, error) {
-	h := hmac.New(sha256.New, []byte(key))
+type mClaims struct {
+	SessionID string `json:"session"`
+	jwt.StandardClaims
+}
 
-	_, err := h.Write([]byte(sessionID))
-	if err != nil {
-		return "", fmt.Errorf("Failed to write to hmac in createToken: %w", err)
+func createToken(sessionID string) (string, error) {
+
+	claims := mClaims{
+		SessionID: sessionID,
+		StandardClaims: jwt.StandardClaims{
+			ExpiresAt: time.Now().Add(1 * time.Minute).Unix(),
+		},
 	}
 
-	code := h.Sum(nil)
-	result := base64.URLEncoding.EncodeToString(code) + "|" + sessionID
-	return result, nil
+	t := jwt.NewWithClaims(jwt.SigningMethodHS256, &claims)
+
+	ss, err := t.SignedString(key)
+	if err != nil {
+		return "", fmt.Errorf("Error in createToken while signing JWT: %w", err)
+	}
+
+	return ss, nil
 }
 
 func parseToken(token string) (string, error) {
-	xs := strings.SplitN(token, "|", 2)
-	if len(xs) != 2 {
-		return "", fmt.Errorf("Error in Token")
+
+	t, err := jwt.ParseWithClaims(token, &mClaims{},
+		func(tok *jwt.Token) (interface{}, error) {
+			if tok.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+				return nil, fmt.Errorf("Error in Siging Algorithm used")
+			}
+			return key, nil
+		})
+
+	if err != nil || !t.Valid {
+		return "", fmt.Errorf("Error in parseToken when parsing : %w", err)
 	}
 
-	code, err := base64.URLEncoding.DecodeString(xs[0])
-	if err != nil {
-		return "", fmt.Errorf("Failed decode base64 code in parseToken: %w", err)
+	v, ok := t.Claims.(*mClaims)
+	if !ok {
+		return "", fmt.Errorf("Incorrect Claims Type")
 	}
 
-	sessionID := xs[1]
-
-	h := hmac.New(sha256.New, []byte(key))
-	_, err = h.Write([]byte(sessionID))
-	if err != nil {
-		return "", fmt.Errorf("Failed to write to hmac in parseToken: %w", err)
-	}
-
-	v := h.Sum(nil)
-
-	equal := hmac.Equal(code, v)
-	if !equal {
-		return "", fmt.Errorf("Error in Token or it was tampered with")
-	}
-
-	return sessionID, nil
+	return v.SessionID, nil
 }
