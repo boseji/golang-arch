@@ -6,10 +6,15 @@
     <title>Registration Form</title>
 </head>
 <body>
+    <div>{{if ne .User ""}}
+        <h1>Username : {{.User}}</h1>{{end}}
+        <p>{{.Message}}</p>
+    </div>
     <div>
         <h1>Registration Form</h1>
         <form action="/register" method="POST">
-            <p><input type="email" name="emailField" placeholder="Email" autofocus></p>
+            <p><input type="text" name="first" placeholder="First Name"  autofocus></p>
+            <p><input type="email" name="emailField" placeholder="Email"></p>
             <p><input type="password" name="passField" placeholder="Password"></p>
             <p><input type="submit" value="Submit"></p>
         </form>
@@ -21,9 +26,6 @@
             <p><input type="password" name="passField" placeholder="Password"></p>
             <p><input type="submit" value="Submit"></p>
         </form>
-    </div>
-    <div>
-        <p>{{.}}</p>
     </div>
 </body>
 </html>

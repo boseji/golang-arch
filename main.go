@@ -16,26 +16,13 @@ import (
 )
 
 func main() {
-	fmt.Print("\nNinja Level 2 - Hands-On Exercise 4\n\n")
+	fmt.Print("\nNinja Level 2 - Hands-On Exercise 5\n\n")
 	/*
 		For this hands-on exercise:
 
-		Modify the server from the previous exercise
-		- On /login
-			- Generate a session id
-				- Use a map sessions between session id and username
-			- Use createToken with the generated session id
-			- Set the token as the value of a session cookie
-
-		- Change login endpoint to redirect the user back to /
-		- On /
-			- Use parseToken to get the session id
-			- Use the sessions map to get the username
-			- Display the username in the page if one has been found
-				- No username will be displayed if
-					- No session cookie set
-					- Session cookie validation failed
-					- No session in the sessions map to a username
+		- Modify the server from the previous exercise
+		- have the db map store a struct of user fields, including bcrypted password
+		- display a user field (not bcrypted password) when someone’s session is active
 	*/
 	http.HandleFunc("/", index)
 	http.HandleFunc("/register", register)
@@ -45,7 +32,17 @@ func main() {
 	log.Fatalln(http.ListenAndServe(":8080", nil))
 }
 
-var store = map[string][]byte{}
+type user struct {
+	First    string
+	password []byte
+}
+
+type dataTemp struct {
+	User    string
+	Message string
+}
+
+var db = map[string]user{}
 var sessions = map[string]string{}
 
 const key = "This is a Super Secret Key"
@@ -61,13 +58,12 @@ func index(w http.ResponseWriter, r *http.Request) {
 	}
 
 	message := ""
-
+	userid := ""
 	sessionID, err := parseToken(c.Value)
 	if err == nil {
-		userid, ok := sessions[sessionID]
-		if ok {
-			message = "Logged In as " + userid + " | "
-		}
+		userid = sessions[sessionID]
+		first := db[userid].First
+		userid = fmt.Sprintf("%s <%s>", first, userid)
 	}
 
 	if errMsg != "" {
@@ -76,7 +72,11 @@ func index(w http.ResponseWriter, r *http.Request) {
 	if successMsg != "" {
 		message = message + successMsg + " - Success"
 	}
-	tpl.Execute(w, message)
+
+	tpl.Execute(w, dataTemp{
+		User:    userid,
+		Message: message,
+	})
 }
 
 func register(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +86,8 @@ func register(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
 		return
 	}
+
+	first := r.FormValue("first")
 
 	email := r.FormValue("emailField")
 	if email == "" {
@@ -103,7 +105,7 @@ func register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, ok := store[email]; ok {
+	if _, ok := db[email]; ok {
 		log.Println("User Already exists - email -", email)
 		msg := url.QueryEscape("Failed to Register due to Internal Server Error")
 		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
@@ -118,7 +120,10 @@ func register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	store[email] = pw
+	db[email] = user{
+		First:    first,
+		password: pw,
+	}
 
 	msg := "Created User -"
 	log.Println(msg, email)
@@ -150,7 +155,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	oldPass, ok := store[email]
+	oldPass, ok := db[email]
 	if !ok {
 		log.Println("Error User does not exists for -", email)
 		msg := url.QueryEscape("Login Failed")
@@ -158,7 +163,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := bcrypt.CompareHashAndPassword(oldPass, []byte(pass))
+	err := bcrypt.CompareHashAndPassword(oldPass.password, []byte(pass))
 	if err != nil {
 		log.Println("Incorrect Passwords -", email)
 		msg := url.QueryEscape("Login Failed")
