@@ -11,23 +11,31 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/gofrs/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
 func main() {
-	fmt.Print("\nNinja Level 2 - Hands-On Exercise 3\n\n")
+	fmt.Print("\nNinja Level 2 - Hands-On Exercise 4\n\n")
 	/*
 		For this hands-on exercise:
-			Modify the server from the previous exercise
-			Add a login form to the webpage
-				The form should take in a username and password
-				The form should post to a /login endpoint
-			Add a new endpoint /login
-				The endpoint should compare the given credentials with stored
-				credentials in the user map
-					Make sure to use the bcrypt function to compare the password
-			If the credentials match, display a webpage saying login successful
-			If the credentials do not match, display a webpage saying login failed
+
+		Modify the server from the previous exercise
+		- On /login
+			- Generate a session id
+				- Use a map sessions between session id and username
+			- Use createToken with the generated session id
+			- Set the token as the value of a session cookie
+
+		- Change login endpoint to redirect the user back to /
+		- On /
+			- Use parseToken to get the session id
+			- Use the sessions map to get the username
+			- Display the username in the page if one has been found
+				- No username will be displayed if
+					- No session cookie set
+					- Session cookie validation failed
+					- No session in the sessions map to a username
 	*/
 	http.HandleFunc("/", index)
 	http.HandleFunc("/register", register)
@@ -38,6 +46,7 @@ func main() {
 }
 
 var store = map[string][]byte{}
+var sessions = map[string]string{}
 
 const key = "This is a Super Secret Key"
 
@@ -46,12 +55,26 @@ func index(w http.ResponseWriter, r *http.Request) {
 	successMsg := r.FormValue("successMsg")
 	tpl := template.Must(template.ParseFiles("index.gohtml"))
 
+	c, err := r.Cookie("session")
+	if err != nil {
+		c = &http.Cookie{}
+	}
+
 	message := ""
+
+	sessionID, err := parseToken(c.Value)
+	if err == nil {
+		userid, ok := sessions[sessionID]
+		if ok {
+			message = "Logged In as " + userid + " | "
+		}
+	}
+
 	if errMsg != "" {
-		message = "Error - " + errMsg
+		message = message + "Error - " + errMsg
 	}
 	if successMsg != "" {
-		message = successMsg + " - Success"
+		message = message + successMsg + " - Success"
 	}
 	tpl.Execute(w, message)
 }
@@ -80,20 +103,12 @@ func register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	oldPass := []byte{}
-	if p, ok := store[email]; ok {
-		oldPass = p
+	if _, ok := store[email]; ok {
+		log.Println("User Already exists - email -", email)
+		msg := url.QueryEscape("Failed to Register due to Internal Server Error")
+		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
+		return
 	}
-
-	updated := len(oldPass) != 0
-
-	err := bcrypt.CompareHashAndPassword(oldPass, []byte(pass))
-	if err != nil && updated {
-		log.Println("Changing Passwords -", email)
-	}
-
-	olduser := updated && err == nil
-	updated = updated && err != nil
 
 	pw, err := bcrypt.GenerateFromPassword([]byte(pass), bcrypt.DefaultCost)
 	if err != nil {
@@ -106,12 +121,6 @@ func register(w http.ResponseWriter, r *http.Request) {
 	store[email] = pw
 
 	msg := "Created User -"
-	if updated {
-		msg = "Updated User -"
-	}
-	if olduser {
-		msg = "Valid User -"
-	}
 	log.Println(msg, email)
 	msg = url.QueryEscape("Registered")
 	http.Redirect(w, r, "/?successMsg="+msg, http.StatusSeeOther)
@@ -141,8 +150,13 @@ func login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	oldPass := []byte{}
 	oldPass, ok := store[email]
+	if !ok {
+		log.Println("Error User does not exists for -", email)
+		msg := url.QueryEscape("Login Failed")
+		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
+		return
+	}
 
 	err := bcrypt.CompareHashAndPassword(oldPass, []byte(pass))
 	if err != nil {
@@ -158,6 +172,34 @@ func login(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
 		return
 	}
+
+	u, err := uuid.NewV4()
+	if err != nil {
+		log.Println("Error generating Session ID")
+		log.Println(err)
+		msg := url.QueryEscape("Login Failed")
+		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
+		return
+	}
+	sessionID := u.String()
+
+	ss, err := createToken(sessionID)
+	if err != nil {
+		log.Println("Error Signing Session ID")
+		log.Println(err)
+		msg := url.QueryEscape("Login Failed")
+		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
+	}
+
+	sessions[sessionID] = email
+	c := &http.Cookie{
+		Name:     "session",
+		Value:    ss,
+		HttpOnly: true,
+		MaxAge:   60,
+		SameSite: http.SameSiteStrictMode,
+	}
+	http.SetCookie(w, c)
 
 	log.Println("Login Successful", email)
 	msg := url.QueryEscape("Logged In")
