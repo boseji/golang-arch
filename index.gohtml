@@ -16,7 +16,7 @@
             <p><input type="text" name="first" placeholder="First Name"  autofocus></p>
             <p><input type="email" name="emailField" placeholder="Email"></p>
             <p><input type="password" name="passField" placeholder="Password"></p>
-            <p><input type="submit" value="Submit"></p>
+            <p><input type="submit" value="Register"></p>
         </form>
     </div>
     <div>
@@ -24,7 +24,13 @@
         <form action="/login" method="post">
             <p><input type="email" name="emailField" id="email" placeholder="Email"></p>
             <p><input type="password" name="passField" placeholder="Password"></p>
-            <p><input type="submit" value="Submit"></p>
+            <p><input type="submit" value="Login"></p>
+        </form>
+    </div>
+    <div>
+        <h1>Logout Form</h1>
+        <form action="/logout" method="post">
+            <p><input type="submit" value="Logout"></p>
         </form>
     </div>
 </body>

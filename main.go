@@ -32,21 +32,17 @@ const password = "This is a Super Secret Key"
 var key []byte
 
 func main() {
-	fmt.Print("\nNinja Level 2 - Hands-On Exercise 6\n\n")
+	fmt.Print("\nNinja Level 2 - Hands-On Exercise 7\n\n")
 	/*
 		For this hands-on exercise:
 
 		- Modify the server from the previous exercise
-		- Modify createToken and parseToken to use JWT
-			= Create a custom claims type that embeds jwt.StandardClaims
-			= The custom claims type should have the session id in it
-			= Make sure to set the ExpiresAt field with a time limit
-				time.Now().......
-			= Use an HMAC signing method
-			= Make sure to check if the token is valid in the parseToken endpoint
-		- Question
-			- will we still need our sessions table / database?
-			- YES!
+		- Add a new form to /
+			= It should just have a submit button labeled logout
+			= It should post to /logout
+		- Add a new endpoint /logout
+			= Delete the session of the current user from the sessions map
+			= Set the cookie of the user to be deleted
 	*/
 	k := sha256.Sum256([]byte(password))
 	key = k[:]
@@ -54,6 +50,7 @@ func main() {
 	http.HandleFunc("/", index)
 	http.HandleFunc("/register", register)
 	http.HandleFunc("/login", login)
+	http.HandleFunc("/logout", logout)
 
 	fmt.Print("Starting Server on :8080\n\n")
 	log.Fatalln(http.ListenAndServe(":8080", nil))
@@ -218,9 +215,49 @@ func login(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode,
 	}
 	http.SetCookie(w, c)
-
+	log.Println("New Sessions -", sessions)
 	log.Println("Login Successful", email)
 	msg := url.QueryEscape("Logged In")
+	http.Redirect(w, r, "/?successMsg="+msg, http.StatusSeeOther)
+}
+
+func logout(w http.ResponseWriter, r *http.Request) {
+
+	if r.Method != http.MethodPost {
+		log.Printf("Bad Method (logout): %v\n", r.Method)
+		msg := url.QueryEscape("Bad Submit Method used")
+		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
+		return
+	}
+
+	c, err := r.Cookie("session")
+	if err != nil {
+		log.Println("/logout :Error No Cookie Present -", err)
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	sid, err := parseToken(c.Value)
+	if err != nil {
+		log.Println("/logout :Error Invalid Token -", err)
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	user, ok := sessions[sid]
+	if !ok {
+		log.Println("/logout :Error Session not present or deleted -", err)
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	delete(sessions, sid)
+	c.MaxAge = -1
+	c.Value = ""
+	log.Println("New Sessions -", sessions)
+	log.Println("/logout : Logged Out User -", user)
+	http.SetCookie(w, c)
+	msg := url.QueryEscape("Logged Out")
 	http.Redirect(w, r, "/?successMsg="+msg, http.StatusSeeOther)
 }
 
