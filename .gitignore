@@ -16,3 +16,6 @@
 
 # Workspaces
 *.code-workspace
+
+# Credentials
+credentials.sh

@@ -1,308 +1,149 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
 	"html/template"
+	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
-	"net/url"
+	"os"
+	"strings"
 	"time"
 
-	"github.com/dgrijalva/jwt-go"
-	"github.com/gofrs/uuid"
-	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/github"
 )
-
-type user struct {
-	First    string
-	password []byte
-}
-
-type dataTemp struct {
-	User    string
-	Message string
-}
-
-var db = map[string]user{}
-var sessions = map[string]string{}
 
 const password = "This is a Super Secret Key"
 
 var key []byte
 
-func main() {
-	fmt.Print("\nNinja Level 2 - Hands-On Exercise 7\n\n")
-	/*
-		For this hands-on exercise:
+var githubOauthConfig = &oauth2.Config{
+	ClientID:     "",
+	ClientSecret: "",
+	Endpoint:     github.Endpoint,
+	RedirectURL:  "",
+	Scopes:       []string{},
+}
 
-		- Modify the server from the previous exercise
-		- Add a new form to /
-			= It should just have a submit button labeled logout
-			= It should post to /logout
-		- Add a new endpoint /logout
-			= Delete the session of the current user from the sessions map
-			= Set the cookie of the user to be deleted
+type dataTemplate struct {
+	User    string
+	Message string
+}
+
+// key = SessionID and Value = Auth Code from Github
+var githubSessions = map[string]string{}
+
+// Key = code and Value= Expiry Time
+var githubRequest = map[string]time.Time{}
+
+func main() {
+	fmt.Print("\nOAuth2 github - Base page\n\n")
+	/*
+		Make sure that the Page is able to show
+		the Login button and Redirect to Github.
 	*/
 	k := sha256.Sum256([]byte(password))
 	key = k[:]
 
+	githubOauthConfig.ClientID = os.Getenv("CLIENT_ID")
+	githubOauthConfig.ClientSecret = os.Getenv("CLIENT_SECRET")
+
 	http.HandleFunc("/", index)
-	http.HandleFunc("/register", register)
-	http.HandleFunc("/login", login)
-	http.HandleFunc("/logout", logout)
+	http.HandleFunc("/oauth2/github/start", startGithubOAuth)
+	http.HandleFunc("/oauth2/github/receive", completeGithubOAuth)
 
 	fmt.Print("Starting Server on :8080\n\n")
 	log.Fatalln(http.ListenAndServe(":8080", nil))
 }
 
-func index(w http.ResponseWriter, r *http.Request) {
-	errMsg := r.FormValue("errorMsg")
-	successMsg := r.FormValue("successMsg")
-	tpl := template.Must(template.ParseFiles("index.gohtml"))
-
-	c, err := r.Cookie("session")
-	if err != nil {
-		c = &http.Cookie{}
-	}
-
-	message := ""
-	userid := ""
-	sessionID, err := parseToken(c.Value)
+// Generate a Code with Expiry timeout
+func generateCode(d time.Duration) (string, time.Time) {
+	// Unique code to identify the Request
+	code := "0000"
+	buf := make([]byte, 16)
+	_, err := io.ReadFull(rand.Reader, buf)
 	if err == nil {
-		userid = sessions[sessionID]
-		first := db[userid].First
-		userid = fmt.Sprintf("%s <%s>", first, userid)
+		code = fmt.Sprintf("%x", buf)
 	}
-
-	if errMsg != "" {
-		message = message + "Error - " + errMsg
-	}
-	if successMsg != "" {
-		message = message + successMsg + " - Success"
-	}
-
-	tpl.Execute(w, dataTemp{
-		User:    userid,
-		Message: message,
-	})
+	return code, time.Now().Add(d)
 }
 
-func register(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		log.Printf("Bad Method (register): %v\n", r.Method)
-		msg := url.QueryEscape("Bad Submit Method used")
-		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
-		return
-	}
-
-	first := r.FormValue("first")
-
-	email := r.FormValue("emailField")
-	if email == "" {
-		log.Println("Email Empty")
-		msg := url.QueryEscape("Email needed")
-		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
-		return
-	}
-
-	pass := r.FormValue("passField")
-	if pass == "" {
-		log.Println("Password Empty")
-		msg := url.QueryEscape("Password needed")
-		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
-		return
-	}
-
-	if _, ok := db[email]; ok {
-		log.Println("User Already exists - email -", email)
-		msg := url.QueryEscape("Failed to Register due to Internal Server Error")
-		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
-		return
-	}
-
-	pw, err := bcrypt.GenerateFromPassword([]byte(pass), bcrypt.DefaultCost)
+func index(w http.ResponseWriter, r *http.Request) {
+	t := template.Must(template.ParseFiles("index.gohtml"))
+	err := t.Execute(w, &dataTemplate{})
 	if err != nil {
-		log.Println(err)
-		msg := url.QueryEscape("Failed to Register due to Internal Server Error")
-		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
-		return
+		log.Println("Error in Parsing File: ", err)
+		http.Error(w, "Error in Rendering Page", http.StatusInternalServerError)
 	}
-
-	db[email] = user{
-		First:    first,
-		password: pw,
-	}
-
-	msg := "Created User -"
-	log.Println(msg, email)
-	msg = url.QueryEscape("Registered")
-	http.Redirect(w, r, "/?successMsg="+msg, http.StatusSeeOther)
 }
 
-func login(w http.ResponseWriter, r *http.Request) {
+func startGithubOAuth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		log.Printf("Bad Method (login): %v\n", r.Method)
-		msg := url.QueryEscape("Bad Submit Method used")
-		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
+		log.Println("/oauth2/github/start: Incorrect Oauth Call method -", r.Method)
+		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
+	code, t := generateCode(time.Second * 40)
+	// Append the Request
+	githubRequest[code] = t
 
-	email := r.FormValue("emailField")
-	if email == "" {
-		log.Println("Email Empty (login)")
-		msg := url.QueryEscape("Email needed")
-		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
-		return
-	}
+	redirectURL := githubOauthConfig.AuthCodeURL(code)
+	http.Redirect(w, r, redirectURL, http.StatusSeeOther)
+}
 
-	pass := r.FormValue("passField")
-	if pass == "" {
-		log.Println("Password Empty (login)")
-		msg := url.QueryEscape("Password needed")
-		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
-		return
-	}
-
-	oldPass, ok := db[email]
+func completeGithubOAuth(w http.ResponseWriter, r *http.Request) {
+	state := r.FormValue("state")
+	timeout, ok := githubRequest[state]
 	if !ok {
-		log.Println("Error User does not exists for -", email)
-		msg := url.QueryEscape("Login Failed")
-		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
+		log.Println("/oauth2/github/receive: Incorrect Redirect with state-", state)
+		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-
-	err := bcrypt.CompareHashAndPassword(oldPass.password, []byte(pass))
-	if err != nil {
-		log.Println("Incorrect Passwords -", email)
-		msg := url.QueryEscape("Login Failed")
-		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
-		return
-	}
-
-	if !ok {
-		log.Println("User Does not Exist -", email)
-		msg := url.QueryEscape("Login Failed")
-		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
-		return
-	}
-
-	u, err := uuid.NewV4()
-	if err != nil {
-		log.Println("Error generating Session ID")
-		log.Println(err)
-		msg := url.QueryEscape("Login Failed")
-		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
-		return
-	}
-	sessionID := u.String()
-
-	ss, err := createToken(sessionID)
-	if err != nil {
-		log.Println("Error Signing Session ID")
-		log.Println(err)
-		msg := url.QueryEscape("Login Failed")
-		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
-		return
-	}
-
-	sessions[sessionID] = email
-	c := &http.Cookie{
-		Name:     "session",
-		Value:    ss,
-		HttpOnly: true,
-		MaxAge:   60,
-		SameSite: http.SameSiteStrictMode,
-	}
-	http.SetCookie(w, c)
-	log.Println("New Sessions -", sessions)
-	log.Println("Login Successful", email)
-	msg := url.QueryEscape("Logged In")
-	http.Redirect(w, r, "/?successMsg="+msg, http.StatusSeeOther)
-}
-
-func logout(w http.ResponseWriter, r *http.Request) {
-
-	if r.Method != http.MethodPost {
-		log.Printf("Bad Method (logout): %v\n", r.Method)
-		msg := url.QueryEscape("Bad Submit Method used")
-		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
-		return
-	}
-
-	c, err := r.Cookie("session")
-	if err != nil {
-		log.Println("/logout :Error No Cookie Present -", err)
+	if timeout.Unix() < time.Now().Unix() {
+		log.Println("/oauth2/github/receive: May Have expired -", timeout.String())
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
 
-	sid, err := parseToken(c.Value)
-	if err != nil {
-		log.Println("/logout :Error Invalid Token -", err)
+	code := r.FormValue("code")
+	if len(code) == 0 {
+		log.Println("/oauth2/github/receive: Error Code found to be Zero Value")
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
 
-	user, ok := sessions[sid]
-	if !ok {
-		log.Println("/logout :Error Session not present or deleted -", err)
+	token, err := githubOauthConfig.Exchange(r.Context(), code)
+	if err != nil {
+		log.Println("/oauth2/github/receive: Error in Token Exchange -", err)
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
 
-	delete(sessions, sid)
-	c.MaxAge = -1
-	c.Value = ""
-	log.Println("New Sessions -", sessions)
-	log.Println("/logout : Logged Out User -", user)
-	http.SetCookie(w, c)
-	msg := url.QueryEscape("Logged Out")
-	http.Redirect(w, r, "/?successMsg="+msg, http.StatusSeeOther)
-}
+	ts := githubOauthConfig.TokenSource(r.Context(), token)
 
-type mClaims struct {
-	SessionID string `json:"session"`
-	jwt.StandardClaims
-}
+	client := oauth2.NewClient(r.Context(), ts)
 
-func createToken(sessionID string) (string, error) {
-
-	claims := mClaims{
-		SessionID: sessionID,
-		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: time.Now().Add(1 * time.Minute).Unix(),
-		},
-	}
-
-	t := jwt.NewWithClaims(jwt.SigningMethodHS256, &claims)
-
-	ss, err := t.SignedString(key)
+	requestBody := strings.NewReader(`{ "query": "query { viewer { id } }" }`)
+	resp, err := client.Post("https://api.github.com/graphql",
+		"application/json", requestBody)
 	if err != nil {
-		return "", fmt.Errorf("Error in createToken while signing JWT: %w", err)
+		log.Println("/oauth2/github/receive: Failed to Get Data-", err)
+		http.Error(w, "Error in Fetching Data", http.StatusInternalServerError)
+		return
 	}
+	defer resp.Body.Close()
 
-	return ss, nil
-}
-
-func parseToken(token string) (string, error) {
-
-	t, err := jwt.ParseWithClaims(token, &mClaims{},
-		func(tok *jwt.Token) (interface{}, error) {
-			if tok.Method.Alg() != jwt.SigningMethodHS256.Alg() {
-				return nil, fmt.Errorf("Error in Siging Algorithm used")
-			}
-			return key, nil
-		})
-
-	if err != nil || !t.Valid {
-		return "", fmt.Errorf("Error in parseToken when parsing : %w", err)
+	xb, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Println("/oauth2/github/receive: Failed to Read GithubResponse Data-", err)
+		http.Error(w, "Error in Fetching Data", http.StatusInternalServerError)
+		return
 	}
-
-	v, ok := t.Claims.(*mClaims)
-	if !ok {
-		return "", fmt.Errorf("Incorrect Claims Type")
-	}
-
-	return v.SessionID, nil
+	log.Println("Response-", string(xb))
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+	return
 }
