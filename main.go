@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -19,6 +20,20 @@ import (
 
 const password = "This is a Super Secret Key"
 
+type dataTemplate struct {
+	User    string
+	Message string
+}
+
+// JSON Layout: {"data":{"viewer":{"id":"..."}}}
+type githubResponse struct {
+	Data struct {
+		Viewer struct {
+			ID string `json:"id"`
+		} `json:"viewer"`
+	} `json:"data"`
+}
+
 var key []byte
 
 var githubOauthConfig = &oauth2.Config{
@@ -29,19 +44,14 @@ var githubOauthConfig = &oauth2.Config{
 	Scopes:       []string{},
 }
 
-type dataTemplate struct {
-	User    string
-	Message string
-}
+// key = Github ID , Value = User ID
+var githubConnections = map[string]string{}
 
-// key = SessionID and Value = Auth Code from Github
-var githubSessions = map[string]string{}
-
-// Key = code and Value= Expiry Time
+// Key = code , Value = Expiry Time
 var githubRequest = map[string]time.Time{}
 
 func main() {
-	fmt.Print("\nOAuth2 github - Base page\n\n")
+	fmt.Print("\nOAuth2 github - with Github ID un-marshalled\n\n")
 	/*
 		Make sure that the Page is able to show
 		the Login button and Redirect to Github.
@@ -70,6 +80,15 @@ func generateCode(d time.Duration) (string, time.Time) {
 		code = fmt.Sprintf("%x", buf)
 	}
 	return code, time.Now().Add(d)
+}
+
+func generateUserID(tag string) (string, error) {
+	buf := make([]byte, 16)
+	_, err := io.ReadFull(rand.Reader, buf)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s|%x", tag, buf), nil
 }
 
 func index(w http.ResponseWriter, r *http.Request) {
@@ -143,7 +162,33 @@ func completeGithubOAuth(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Error in Fetching Data", http.StatusInternalServerError)
 		return
 	}
-	log.Println("Response-", string(xb))
+
+	var gr githubResponse
+	err = json.Unmarshal(xb, &gr)
+	if err != nil {
+		log.Println("/oauth2/github/receive: Error in Un-marshalling Data-", err)
+		http.Error(w, "Error in Fetching Data", http.StatusInternalServerError)
+		return
+	}
+
+	githubID := gr.Data.Viewer.ID
+
+	userID, ok := githubConnections[githubID]
+	if !ok {
+		log.Println("/oauth2/github/receive: New User with Github ID -", githubID)
+		// New User Create Account
+		userID, err = generateUserID("github")
+		if err != nil {
+			log.Println("/oauth2/github/receive: Error Generating UserID for github-", err)
+			http.Error(w, "Error in Processing Data", http.StatusInternalServerError)
+			return
+		}
+		log.Println("/oauth2/github/receive: New UserID Generated -", userID)
+		githubConnections[githubID] = userID
+	}
+	// Login to Account using JWT Token
+	log.Println("/oauth2/github/receive: GithubID =", githubID, " UserID =", userID)
+	// Route them Back to Main Page
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 	return
 }
