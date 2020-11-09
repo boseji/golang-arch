@@ -1,194 +1,120 @@
 package main
 
 import (
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/json"
 	"fmt"
-	"html/template"
-	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
+	"github.com/gofrs/uuid"
 	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/github"
+	"golang.org/x/oauth2/heroku"
 )
 
-const password = "This is a Super Secret Key"
+const cNameSessionCookie = "session"
+const cLogingAttemptExpireDuration = 1 * time.Hour
 
-type dataTemplate struct {
-	User    string
-	Message string
-}
-
-// JSON Layout: {"data":{"viewer":{"id":"..."}}}
-type githubResponse struct {
-	Data struct {
-		Viewer struct {
-			ID string `json:"id"`
-		} `json:"viewer"`
-	} `json:"data"`
-}
-
-var key []byte
-
-var githubOauthConfig = &oauth2.Config{
+var herokuOAuth2Config = &oauth2.Config{
 	ClientID:     "",
 	ClientSecret: "",
-	Endpoint:     github.Endpoint,
-	RedirectURL:  "",
-	Scopes:       []string{},
+	Endpoint:     heroku.Endpoint,
+	RedirectURL:  "http://localhost:8080/oauth/heroku/receive",
+	Scopes:       []string{"identity"},
 }
 
-// key = Github ID , Value = User ID
-var githubConnections = map[string]string{}
-
-// Key = code , Value = Expiry Time
-var githubRequest = map[string]time.Time{}
+// Key is UUID of login attempt , Value is expiration for loging attempt
+var loginAttempt = map[string]int64{}
 
 func main() {
-	fmt.Print("\nOAuth2 github - with Github ID un-marshalled\n\n")
-	/*
-		Make sure that the Page is able to show
-		the Login button and Redirect to Github.
-	*/
-	k := sha256.Sum256([]byte(password))
-	key = k[:]
+	fmt.Print("\nNinja Level 3 - Hands-On Exercise #2\n\n")
 
-	githubOauthConfig.ClientID = os.Getenv("CLIENT_ID")
-	githubOauthConfig.ClientSecret = os.Getenv("CLIENT_SECRET")
+	/*
+		For this hands-on exercise:
+
+		- Modify the server from Ninja Level 2
+		- Create an oauth2.Config for your provider
+			> Fill it in with information from hand-on-exercise 1
+				= ClientID
+				= ClientSecret
+				= Endpoints
+					AuthURL
+					TokenURL
+				= RedirectURL
+					http://localhost:8080/oauth/<your provider>/receive
+				= Scopes
+					IF NEEDED
+		- Create an endpoint /oauth/<your provider>/login
+			> This should be a POST endpoint
+			> This should generate a uuid to use as the state value
+			> A new map should be used to save the state and the expiration time
+				or this login attempt
+				= Key is a string state
+				= Value is a time.Time expiration time
+					One hour in the future is a reasonable time
+			> Redirect the user to the oauth2 AuthCodeURL value
+		- Modify your / index page to include an oauth login form
+			> The form should post to /oauth/<your provider>/login
+			> The login form should only have a submit button
+		- LET’S TEST OUR CODE!
+			Verify that attempting to login sends you to the oauth provider’s
+			login page and approving sends you back to
+			/oauth/<your provider>/receive
+				You do not have this endpoint yet, if you are using the
+				http.ServeMux, your index page will serve this endpoint
+
+	*/
+
+	herokuOAuth2Config.ClientID = os.Getenv("CLIENT_ID")
+	herokuOAuth2Config.ClientSecret = os.Getenv("CLIENT_SECRET")
 
 	http.HandleFunc("/", index)
-	http.HandleFunc("/oauth2/github/start", startGithubOAuth)
-	http.HandleFunc("/oauth2/github/receive", completeGithubOAuth)
+	http.HandleFunc("/oauth/heroku/login", startHerokuOauth)
 
-	fmt.Print("Starting Server on :8080\n\n")
+	log.Println("Starting Server on Port :8080")
 	log.Fatalln(http.ListenAndServe(":8080", nil))
 }
 
-// Generate a Code with Expiry timeout
-func generateCode(d time.Duration) (string, time.Time) {
-	// Unique code to identify the Request
-	code := "0000"
-	buf := make([]byte, 16)
-	_, err := io.ReadFull(rand.Reader, buf)
-	if err == nil {
-		code = fmt.Sprintf("%x", buf)
-	}
-	return code, time.Now().Add(d)
-}
-
-func generateUserID(tag string) (string, error) {
-	buf := make([]byte, 16)
-	_, err := io.ReadFull(rand.Reader, buf)
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%s|%x", tag, buf), nil
-}
-
 func index(w http.ResponseWriter, r *http.Request) {
-	t := template.Must(template.ParseFiles("index.gohtml"))
-	err := t.Execute(w, &dataTemplate{})
-	if err != nil {
-		log.Println("Error in Parsing File: ", err)
-		http.Error(w, "Error in Rendering Page", http.StatusInternalServerError)
-	}
+	fmt.Fprintf(w, `<!DOCTYPE html>
+	<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>OAuth - Ninja Level 3 - Hands-On Exercise #2</title>
+	</head>
+	<body>
+		<form action="/oauth/heroku/login" method="post">
+			<input type="submit" value="Login Via Heroku">
+		</form>
+	</body>
+	</html>`)
 }
 
-func startGithubOAuth(w http.ResponseWriter, r *http.Request) {
+func attemptCode() (string, error) {
+	u, err := uuid.NewV4()
+	if err != nil {
+		return "", fmt.Errorf("Error in attemptCode while generating UUID - %w", err)
+	}
+	uuid := u.String()
+	loginAttempt[uuid] = time.Now().Add(cLogingAttemptExpireDuration).Unix()
+	return uuid, nil
+}
+
+func startHerokuOauth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		log.Println("/oauth2/github/start: Incorrect Oauth Call method -", r.Method)
+		log.Println("/oauth/heroku/login: Error Wrong Method invoked-", r.Method)
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	code, t := generateCode(time.Second * 40)
-	// Append the Request
-	githubRequest[code] = t
 
-	redirectURL := githubOauthConfig.AuthCodeURL(code)
+	uuid, err := attemptCode()
+	if err != nil {
+		log.Println("/oauth/heroku/login: Error Attempt Code-", err)
+		http.Error(w, "Oops! Something went wrong.", http.StatusInternalServerError)
+		return
+	}
+
+	redirectURL := herokuOAuth2Config.AuthCodeURL(uuid)
 	http.Redirect(w, r, redirectURL, http.StatusSeeOther)
-}
-
-func completeGithubOAuth(w http.ResponseWriter, r *http.Request) {
-	state := r.FormValue("state")
-	timeout, ok := githubRequest[state]
-	if !ok {
-		log.Println("/oauth2/github/receive: Incorrect Redirect with state-", state)
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
-	}
-	if timeout.Unix() < time.Now().Unix() {
-		log.Println("/oauth2/github/receive: May Have expired -", timeout.String())
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
-	}
-
-	code := r.FormValue("code")
-	if len(code) == 0 {
-		log.Println("/oauth2/github/receive: Error Code found to be Zero Value")
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
-	}
-
-	token, err := githubOauthConfig.Exchange(r.Context(), code)
-	if err != nil {
-		log.Println("/oauth2/github/receive: Error in Token Exchange -", err)
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
-	}
-
-	ts := githubOauthConfig.TokenSource(r.Context(), token)
-
-	client := oauth2.NewClient(r.Context(), ts)
-
-	requestBody := strings.NewReader(`{ "query": "query { viewer { id } }" }`)
-	resp, err := client.Post("https://api.github.com/graphql",
-		"application/json", requestBody)
-	if err != nil {
-		log.Println("/oauth2/github/receive: Failed to Get Data-", err)
-		http.Error(w, "Error in Fetching Data", http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	xb, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		log.Println("/oauth2/github/receive: Failed to Read GithubResponse Data-", err)
-		http.Error(w, "Error in Fetching Data", http.StatusInternalServerError)
-		return
-	}
-
-	var gr githubResponse
-	err = json.Unmarshal(xb, &gr)
-	if err != nil {
-		log.Println("/oauth2/github/receive: Error in Un-marshalling Data-", err)
-		http.Error(w, "Error in Fetching Data", http.StatusInternalServerError)
-		return
-	}
-
-	githubID := gr.Data.Viewer.ID
-
-	userID, ok := githubConnections[githubID]
-	if !ok {
-		log.Println("/oauth2/github/receive: New User with Github ID -", githubID)
-		// New User Create Account
-		userID, err = generateUserID("github")
-		if err != nil {
-			log.Println("/oauth2/github/receive: Error Generating UserID for github-", err)
-			http.Error(w, "Error in Processing Data", http.StatusInternalServerError)
-			return
-		}
-		log.Println("/oauth2/github/receive: New UserID Generated -", userID)
-		githubConnections[githubID] = userID
-	}
-	// Login to Account using JWT Token
-	log.Println("/oauth2/github/receive: GithubID =", githubID, " UserID =", userID)
-	// Route them Back to Main Page
-	http.Redirect(w, r, "/", http.StatusSeeOther)
-	return
 }
