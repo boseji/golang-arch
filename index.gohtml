@@ -11,12 +11,6 @@
         <p>{{.Message}}</p>
     </div>
     <div>
-        <h1>OAuth2 Form</h1>
-        <form action="/oauth2/github/start" method="post">
-            <input type="submit" value="Login Via Github">
-        </form>
-    </div>
-    <div>
         <h1>Registration Form</h1>
         <form action="/register" method="POST">
             <p><input type="text" name="first" placeholder="First Name"  autofocus></p>
@@ -38,6 +32,12 @@
         <form action="/logout" method="post">
             <p><input type="submit" value="Logout"></p>
         </form>
+    </div>
+    <div>
+        <h1>Login with Heroku</h1>
+        <form action="/oauth/heroku/login" method="post">
+			<input type="submit" value="Login Via Heroku">
+		</form>
     </div>
 </body>
 </html>
