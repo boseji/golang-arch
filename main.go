@@ -80,34 +80,26 @@ var loginAttempt = map[string]time.Time{}
 var oauthConn = map[string]string{}
 
 func main() {
-	fmt.Print("\nNinja Level 3 - Hands-On Exercise #5\n\n")
+	fmt.Print("\nNinja Level 3 - Hands-On Exercise #6\n\n")
 
 	/*
 		For this hands-on exercise:
 
 		- Modify the server from the previous exercise
-		- In endpoint /oauth/<your provider>/receive
-			> When there is no value in the oauthConnections map
-				= Sign the oauth provider’s user ID
-					# Your createToken function for creating a JWT token should work
-				= Redirect the user to /partial-register
-					# Include the signed user ID in a query parameter
-					# Also include any extra information you may get from the oauth
-						provider (name, email, etc.)
-					# Make sure to query escape the values
-		- Create endpoint /partial-register
-			> Send users an html page
-			> Page should have a form
-				= Form should let the users fill in any information needed for their account
-					# Pre-fill the values of any fields with the values from the
-						query parameters, so the user may edit them if they wish
-					# Example extra information:
-						- Name
-						- Age
-						- Agree to the Terms of Service
-						- Email
-					# Use an input type hidden to include the signed user ID
-				= Form should post to /oauth/<your provider>/register
+		- Create endpoint /oauth/<your provider>/register
+			= Extract the oauth provider’s user ID from its token
+				> Your parseToken function should work
+				> Send a user back to / if there is a problem
+			= Create an entry in your user map
+				> Fill in all information using the submitted form
+				> Leave the bcrypted password field blank
+			= Create an entry in your oauthConnections map
+				> Key will be your provider’s user ID
+				> Value will be the new user’s ID
+			= Create a session for your user just like how /login and
+				/oauth/<your provider>/receive does it
+			= Redirect the user back to /
+		- Make sure your /login endpoint will not log in anyone if they have no password
 	*/
 	k := sha256.Sum256([]byte(password))
 	key = k[:]
@@ -122,6 +114,7 @@ func main() {
 	http.HandleFunc("/oauth/heroku/login", oHerokuLogin)
 	http.HandleFunc("/oauth/heroku/receive", oHerokuReceive)
 	http.HandleFunc("/partial-register", partialRegister)
+	http.HandleFunc("/oauth/heroku/register", oHerokuRegister)
 
 	log.Println("Starting Server on Port :8080")
 	log.Fatalln(http.ListenAndServe(":8080", nil))
@@ -246,7 +239,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	oldPass, ok := db[email]
+	userData, ok := db[email]
 	if !ok {
 		log.Println("Error User does not exists for -", email)
 		msg := url.QueryEscape("Login Failed")
@@ -254,7 +247,14 @@ func login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := bcrypt.CompareHashAndPassword(oldPass.password, []byte(pass))
+	if userData.password == nil || len(userData.password) == 0 {
+		log.Println("Error User with no Password or Oauth -", email)
+		msg := url.QueryEscape("Login Failed")
+		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
+		return
+	}
+
+	err := bcrypt.CompareHashAndPassword(userData.password, []byte(pass))
 	if err != nil {
 		log.Println("Incorrect Passwords -", email)
 		msg := url.QueryEscape("Login Failed")
@@ -523,6 +523,67 @@ func partialRegister(w http.ResponseWriter, r *http.Request) {
 
 	tpl := template.Must(template.ParseFiles("partial-register.gohtml"))
 	tpl.Execute(w, d)
+}
+
+func oHerokuRegister(w http.ResponseWriter, r *http.Request) {
+
+	if r.Method != http.MethodPost {
+		log.Println("Error Wrong Method invoked in oHerokuRegister -", r.Method)
+		msg := url.QueryEscape("Bad Submit Method used")
+		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
+		return
+	}
+
+	ss := r.FormValue("user")
+	if ss == "" {
+		log.Println("Error empty User in oHerokuRegister")
+		msg := url.QueryEscape("Invalid Request")
+		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
+		return
+	}
+
+	id, err := parseToken(ss)
+	if err != nil {
+		log.Println("Error parseToken in oHerokuRegister -", err)
+		msg := url.QueryEscape("Invalid Request")
+		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
+		return
+	}
+
+	email := r.FormValue("emailField")
+	if email == "" {
+		log.Println("Error empty Email in oHerokuRegister")
+		msg := url.QueryEscape("Invalid Request")
+		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
+		return
+	}
+
+	if _, ok := db[email]; ok {
+		log.Println("Error in oHerokuRegister - user already exist for", email)
+		msg := url.QueryEscape("Invalid Request")
+		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
+		return
+	}
+
+	name := r.FormValue("first")
+
+	db[email] = user{
+		First: name,
+	}
+
+	oauthConn[id] = email
+
+	// Login the User
+	err = createSession(email, w)
+	if err != nil {
+		log.Println("Error createSession in oHerokuRegister -", err)
+		msg := url.QueryEscape("Unable to Login via Heroku")
+		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
+		return
+	}
+
+	msg := url.QueryEscape("Logged In via Heroku")
+	http.Redirect(w, r, "/?successMsg="+msg, http.StatusSeeOther)
 }
 
 // Since, http.ResponseWriter is an Interface its inherently behaves
