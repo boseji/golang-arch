@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
@@ -21,6 +22,8 @@ import (
 const cNameSessionCookie = "mysession"
 const cLogingAttemptExpireDuration = 1 * time.Hour
 const password = "This is a Super Secret Key"
+const cProviderList = "Heroku"
+const cProviderHeroku = "Heroku"
 
 type user struct {
 	First    string
@@ -28,8 +31,18 @@ type user struct {
 }
 
 type dataTemp struct {
-	User    string
-	Message string
+	User     string
+	Message  string
+	SignedIn bool
+}
+
+type dataPartialTemp struct {
+	Name        string
+	Email       string
+	Age         string
+	ID          string
+	Provider    string
+	ProviderURI string
 }
 
 type mClaims struct {
@@ -67,25 +80,34 @@ var loginAttempt = map[string]time.Time{}
 var oauthConn = map[string]string{}
 
 func main() {
-	fmt.Print("\nNinja Level 3 - Hands-On Exercise #4\n\n")
+	fmt.Print("\nNinja Level 3 - Hands-On Exercise #5\n\n")
 
 	/*
 		For this hands-on exercise:
 
 		- Modify the server from the previous exercise
-		- Create a new map oauthConnections
-			> Key should be user IDs from the oauth provider
-			> Value should be user IDs in your own system
 		- In endpoint /oauth/<your provider>/receive
-			> Extract just the user ID from the result of your call in the previous exercise
-				=  This will usually require creating a struct and unmarshalling/decoding json data
-			> Get the local user ID from the oauthConnections map
-			> If there was no value in the map, set the user ID to a random user ID from your users map
-			> Create a session for your user just like how /login does it
-				= Good candidate for pulling out into a separate function
-			> Redirect the user back to /
-
-		PS: Adding Code from older Ninja Level 2 Exercises
+			> When there is no value in the oauthConnections map
+				= Sign the oauth provider’s user ID
+					# Your createToken function for creating a JWT token should work
+				= Redirect the user to /partial-register
+					# Include the signed user ID in a query parameter
+					# Also include any extra information you may get from the oauth
+						provider (name, email, etc.)
+					# Make sure to query escape the values
+		- Create endpoint /partial-register
+			> Send users an html page
+			> Page should have a form
+				= Form should let the users fill in any information needed for their account
+					# Pre-fill the values of any fields with the values from the
+						query parameters, so the user may edit them if they wish
+					# Example extra information:
+						- Name
+						- Age
+						- Agree to the Terms of Service
+						- Email
+					# Use an input type hidden to include the signed user ID
+				= Form should post to /oauth/<your provider>/register
 	*/
 	k := sha256.Sum256([]byte(password))
 	key = k[:]
@@ -99,6 +121,7 @@ func main() {
 	http.HandleFunc("/logout", logout)
 	http.HandleFunc("/oauth/heroku/login", oHerokuLogin)
 	http.HandleFunc("/oauth/heroku/receive", oHerokuReceive)
+	http.HandleFunc("/partial-register", partialRegister)
 
 	log.Println("Starting Server on Port :8080")
 	log.Fatalln(http.ListenAndServe(":8080", nil))
@@ -128,6 +151,11 @@ func index(w http.ResponseWriter, r *http.Request) {
 		// log.Println("Processing: ", userid)
 	}
 
+	signed := true
+	if userid == "" {
+		signed = false
+	}
+
 	if errMsg != "" {
 		message = message + "Error - " + errMsg
 	}
@@ -136,8 +164,9 @@ func index(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tpl.Execute(w, dataTemp{
-		User:    userid,
-		Message: message,
+		User:     userid,
+		Message:  message,
+		SignedIn: signed,
 	})
 }
 
@@ -287,7 +316,7 @@ func logout(w http.ResponseWriter, r *http.Request) {
 	delete(sessions, sid)
 	c.MaxAge = -1
 	c.Value = ""
-	log.Println("New Sessions -", sessions)
+	//log.Println("New Sessions after Logout -", sessions)
 	log.Println("/logout : Logged Out User -", user)
 	http.SetCookie(w, c)
 	msg := url.QueryEscape("Logged Out")
@@ -363,22 +392,32 @@ func oHerokuReceive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if User Already Exists
+	// Check if Provider User Already Exists
 	userID, ok := oauthConn[herokuData.ID]
 	if !ok {
-		// if not create One
-		u, err := uuid.NewV4()
+		// Provider User Does not exist so forward them
+		// to Partial-Register
+		id := herokuData.ID
+		// Create Token using the heroku User ID
+		ss, err := createToken(id)
 		if err != nil {
-			log.Println("/oauth/heroku/receive: Error in Generating new User ID-", err)
-			msg := url.QueryEscape("Unable to Get data from Heroku")
+			log.Println("/oauth/heroku/receive: couldn't create token for Heroku New User-", err)
+			msg := url.QueryEscape("Unable to process your Heroku data")
 			http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
 			return
 		}
-		userID = u.String()
-		oauthConn[herokuData.ID] = userID
-		db[userID] = user{
-			First: herokuData.Name,
-		}
+		// email := r.FormValue("email")
+		// name := r.FormValue("name")
+		// age := r.FormValue("age")
+		// id := r.FormValue("user")
+		// provider := r.FormValue("provider")
+		uv := url.Values{}
+		uv.Add("email", herokuData.Email)
+		uv.Add("name", herokuData.Name)
+		uv.Add("user", ss)
+		uv.Add("provider", cProviderHeroku)
+		http.Redirect(w, r, "/partial-register?"+uv.Encode(), http.StatusSeeOther)
+		return
 	}
 
 	// Login the User
@@ -430,6 +469,60 @@ func oHerokuAccountAPI(client *http.Client) (*mHerokuData, error) {
 	}
 
 	return hd, nil
+}
+
+func partialRegister(w http.ResponseWriter, r *http.Request) {
+
+	id := r.FormValue("user")
+	if id == "" {
+		msg := url.QueryEscape("Incorrect request - user ID is invalid")
+		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
+		return
+	}
+
+	if c, _ := r.Cookie(cNameSessionCookie); c != nil {
+		msg := url.QueryEscape("Incorrect request - You are already signed-in")
+		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
+		return
+	}
+
+	provider := r.FormValue("provider")
+	if provider == "" {
+		msg := url.QueryEscape("Incorrect request - provider is invalid")
+		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
+		return
+	}
+
+	if !strings.Contains(cProviderList, provider) {
+		log.Println("partialRegister: Invalid Provider Supplied -", provider)
+		msg := url.QueryEscape("Incorrect request - provider is invalid")
+		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
+		return
+	}
+
+	_, err := parseToken(id)
+	if err != nil {
+		log.Println("partialRegister: Error in Parsing Token -", err)
+		msg := url.QueryEscape("Incorrect request")
+		http.Redirect(w, r, "/?errorMsg="+msg, http.StatusSeeOther)
+		return
+	}
+
+	email := r.FormValue("email")
+	name := r.FormValue("name")
+	age := r.FormValue("age")
+
+	d := dataPartialTemp{
+		Name:        name,
+		Email:       email,
+		Age:         age,
+		ID:          id,
+		Provider:    provider,
+		ProviderURI: strings.ToLower(provider),
+	}
+
+	tpl := template.Must(template.ParseFiles("partial-register.gohtml"))
+	tpl.Execute(w, d)
 }
 
 // Since, http.ResponseWriter is an Interface its inherently behaves

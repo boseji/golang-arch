@@ -10,6 +10,14 @@
         <h1>Username : {{.User}}</h1>{{end}}
         <p>{{.Message}}</p>
     </div>
+    {{if .SignedIn }}
+    <div>
+        <h1>Logout Form</h1>
+        <form action="/logout" method="post">
+            <p><input type="submit" value="Logout"></p>
+        </form>
+    </div>
+    {{ else }}
     <div>
         <h1>Registration Form</h1>
         <form action="/register" method="POST">
@@ -28,16 +36,11 @@
         </form>
     </div>
     <div>
-        <h1>Logout Form</h1>
-        <form action="/logout" method="post">
-            <p><input type="submit" value="Logout"></p>
-        </form>
-    </div>
-    <div>
         <h1>Login with Heroku</h1>
         <form action="/oauth/heroku/login" method="post">
 			<input type="submit" value="Login Via Heroku">
 		</form>
     </div>
+    {{ end }}
 </body>
 </html>
