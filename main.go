@@ -4,12 +4,29 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strings"
 )
+
+// ---------------------------------------------------------
+// EXERCISE: Uppercaser
+//
+//  Use a scanner to convert the lines to uppercase, and
+//  print them.
+//
+//  1. Feed the swami_chinmayananda_geeta.txt to your program.
+//
+//  2. Scan the input using a new Scanner.
+//
+//  3. Print each line.
+//
+// EXPECTED OUTPUT
+//  Please run the solution to see the expected output.
+// ---------------------------------------------------------
 
 func main() {
 	// Create a Input Stream
 	in := bufio.NewScanner(os.Stdin)
-	fmt.Println("Enter Some text and end with new-line:")
-	in.Scan()
-	fmt.Printf("Here is what you entered : %s \n", in.Bytes())
+	for in.Scan() {
+		fmt.Printf("%s\n", strings.ToUpper(in.Text()))
+	}
 }
