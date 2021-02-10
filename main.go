@@ -9,44 +9,53 @@ import (
 )
 
 // ---------------------------------------------------------
-// EXERCISE: Unique Words 2
+// EXERCISE: Grep Clone
 //
-//  Use your solution from the previous "Unique Words"
-//  exercise.
+//  Create a grep clone. grep is a command-line utility for
+//  searching plain-text data for lines that match a specific
+//  pattern.
 //
-//  Before adding the words to your map, remove the
-//  punctuation characters and numbers from them.
+//  1. Feed the swami_chinmayananda_geeta to your program.
 //
+//  2. Accept a command-line argument for the pattern
 //
-// BE CAREFUL
+//  3. Only print the lines that contains that pattern
 //
-//  Now the swami_chinmayananda_geeta.txt contains upper and lower
-//  case letters too.
+//  4. If no pattern is provided, print all the lines
 //
 //
 // EXPECTED OUTPUT
 //
-//  go run main.go < swami_chinmayananda_geeta.txt
+//  go run main.go geeta < swami_chinmayananda_geeta
 //
-//   There are 104 words, 70 of them are unique.
+//    Holy Geeta by Swami Chinmayananda
+//    General introduction To Bhagawad Geeta
+//    world and God, the Geeta is a hand-book of instructions as to how every human
+//    Srimad Bhagawad Geeta, the Divine Song of the Lord, occurs in the Bhishma Parva
 //
 // ---------------------------------------------------------
+
 func main() {
-	totalWords := 0
-	wordcount := map[string]bool{}
 	// Regex for Cleaning the Non Unique characters
 	rgx := regexp.MustCompile("[^a-z]+")
+	// Take Arguments
+	args := os.Args[1:]
+	if len(args) == 0 {
+		fmt.Println("Enter the text query to be searched")
+		return
+	}
+	query := rgx.ReplaceAllString(strings.ToLower(args[0]), "")
 	// Create a Input Stream
 	in := bufio.NewScanner(os.Stdin)
-	// Word Splitter
-	in.Split(bufio.ScanWords)
 
 	for in.Scan() {
-		totalWords++
-		word := strings.ToLower(in.Text())
-		word = rgx.ReplaceAllString(word, "")
-		wordcount[word] = true
-	}
+		line := in.Text()
 
-	fmt.Printf("There are %d words, %d of them are unique.\n", totalWords, len(wordcount))
+		if strings.Contains(
+			rgx.ReplaceAllString(strings.ToLower(line), ""),
+			query,
+		) {
+			fmt.Println(line)
+		}
+	}
 }
