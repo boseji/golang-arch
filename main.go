@@ -4,34 +4,38 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"regexp"
+	"strings"
 )
 
 // ---------------------------------------------------------
-// EXERCISE: Unique Words
+// EXERCISE: Unique Words 2
 //
-//  Create a program that prints the total and unique words
-//  from an input stream.
+//  Use your solution from the previous "Unique Words"
+//  exercise.
 //
-//  1. Feed the swami_chinmayananda_geeta.txt to your program.
+//  Before adding the words to your map, remove the
+//  punctuation characters and numbers from them.
 //
-//  2. Scan the input using a new Scanner.
 //
-//  3. Configure the scanner to scan for the words.
+// BE CAREFUL
 //
-//  4. Count the unique words using a map.
-//
-//  5. Print the total and unique words.
+//  Now the swami_chinmayananda_geeta.txt contains upper and lower
+//  case letters too.
 //
 //
 // EXPECTED OUTPUT
 //
-//  There are 104 words, 74 of them are unique.
+//  go run main.go < swami_chinmayananda_geeta.txt
+//
+//   There are 104 words, 70 of them are unique.
 //
 // ---------------------------------------------------------
-
 func main() {
 	totalWords := 0
 	wordcount := map[string]bool{}
+	// Regex for Cleaning the Non Unique characters
+	rgx := regexp.MustCompile("[^a-z]+")
 	// Create a Input Stream
 	in := bufio.NewScanner(os.Stdin)
 	// Word Splitter
@@ -39,7 +43,8 @@ func main() {
 
 	for in.Scan() {
 		totalWords++
-		word := in.Text()
+		word := strings.ToLower(in.Text())
+		word = rgx.ReplaceAllString(word, "")
 		wordcount[word] = true
 	}
 
